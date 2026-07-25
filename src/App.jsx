@@ -29,7 +29,10 @@ export default function App() {
 
   const [mode, setMode] = useState('decoy'); // 'decoy' | 'pin' | 'pairing' | 'chat'
   const [activeRoomCode, setActiveRoomCode] = useState('');
-  const [timerMinutes, setTimerMinutes] = useState(1); // Default 1 minute
+  const [timerMinutes, setTimerMinutes] = useState(() => {
+    const saved = localStorage.getItem('qn_timer_minutes');
+    return saved !== null ? Number(saved) : 5; // Default 5 minutes
+  });
   const [messages, setMessages] = useState([]);
   const [replyingTo, setReplyingTo] = useState(null);
   const [pinnedMessage, setPinnedMessage] = useState(null);
@@ -38,6 +41,11 @@ export default function App() {
   
   const typingTimeoutRef = useRef(null);
   const inactivityTimerRef = useRef(null);
+
+  // Persist timer preference
+  useEffect(() => {
+    localStorage.setItem('qn_timer_minutes', String(timerMinutes));
+  }, [timerMinutes]);
 
   // Auto-Lock on Inactivity or Visibility Change
   useEffect(() => {
