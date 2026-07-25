@@ -3,15 +3,28 @@
 @tailwind utilities;
 
 @layer base {
-  body {
+  html, body {
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
+    background-color: #0B0F17;
   }
+}
+
+/* Safe area padding utilities for modern curved/notch phones */
+.safe-pb {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+.safe-pt {
+  padding-top: max(0.75rem, env(safe-area-inset-top));
 }
 
 /* Custom scrollbars for chat */
 ::-webkit-scrollbar {
-  width: 5px;
+  width: 4px;
 }
 ::-webkit-scrollbar-track {
   background: rgba(15, 23, 42, 0.6);
@@ -49,9 +62,4 @@
 .glass-input:focus {
   border-color: #06B6D4;
   outline: none;
-}
-
-/* Swipe response indicator animation */
-.swipe-indicator {
-  transition: transform 0.2s ease-out, opacity 0.2s ease-out;
 }

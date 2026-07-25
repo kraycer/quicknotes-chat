@@ -41,7 +41,7 @@ export default function App() {
     }
   }, []);
 
-  // Timer loop to purge expired messages dynamically
+  // Timer loop to purge expired messages dynamically locally and on Supabase server
   useEffect(() => {
     const interval = setInterval(() => {
       if (activeRoomCode) {
@@ -49,6 +49,14 @@ export default function App() {
           const filtered = filterExpiredMessages(prev);
           if (filtered.length !== prev.length) {
             saveLocalMessages(activeRoomCode, filtered);
+            // Delete expired messages from Supabase server DB
+            if (isSupabaseConfigured && supabase) {
+              supabase
+                .from('messages')
+                .delete()
+                .lte('expires_at', new Date().toISOString())
+                .then(() => {});
+            }
           }
           return filtered;
         });
@@ -75,7 +83,7 @@ export default function App() {
           .from('messages')
           .select('*')
           .eq('room_code', activeRoomCode)
-          .then(({ data, error }) => {
+          .then(({ data }) => {
             if (data && data.length > 0) {
               setMessages((prev) => {
                 const combined = [...prev];
@@ -89,7 +97,7 @@ export default function App() {
             }
           });
       } catch (e) {
-        console.warn('Error al cargar mensajes iniciales de Supabase:', e);
+        console.warn('Error al cargar mensajes de Supabase:', e);
       }
 
       // 2. Realtime Channel Subscription (Dual Broadcast + Postgres Changes)
@@ -214,7 +222,7 @@ export default function App() {
       read: false
     };
 
-    // 1. Optimistic Local Update (Sender sees message immediately)
+    // 1. Optimistic Local Update
     setMessages((prev) => {
       const updated = filterExpiredMessages([...prev, newMsg]);
       saveLocalMessages(activeRoomCode, updated);
@@ -223,14 +231,12 @@ export default function App() {
 
     // 2. Broadcast & DB Insert
     if (isSupabaseConfigured && supabase) {
-      // Send via Realtime Broadcast Channel (Sub-second peer delivery)
       supabase.channel(`room:${activeRoomCode}`).send({
         type: 'broadcast',
         event: 'new_message',
         payload: newMsg
       });
 
-      // Persist in DB table
       supabase.from('messages').insert([newMsg]).then(({ error }) => {
         if (error) console.error('Error insertando mensaje en Supabase:', error);
       });
@@ -257,6 +263,7 @@ export default function App() {
       setMessages([]);
       saveLocalMessages(activeRoomCode, []);
       if (isSupabaseConfigured && supabase) {
+        supabase.from('messages').delete().eq('room_code', activeRoomCode).then(() => {});
         supabase.channel(`room:${activeRoomCode}`).send({
           type: 'broadcast',
           event: 'burn'
@@ -272,7 +279,7 @@ export default function App() {
   };
 
   return (
-    <div className="w-full h-screen overflow-hidden bg-[#0B0F17]">
+    <div className="w-full h-full h-[100dvh] overflow-hidden bg-[#0B0F17]">
       {/* 1. Decoy Notepad View */}
       {mode === 'decoy' && (
         <DecoyNotepad onOpenPinModal={() => setMode('pin')} />
@@ -286,7 +293,7 @@ export default function App() {
         onUnlockDecoy={() => setMode('decoy')}
       />
 
-      {/* 3. Pairing Hub */}
+      {/* 3. Pairing Hub with Active Conversations List */}
       {mode === 'pairing' && (
         <PairingHub
           userId={userId}
@@ -297,7 +304,7 @@ export default function App() {
 
       {/* 4. Active Chat View */}
       {mode === 'chat' && (
-        <div className="flex flex-col h-screen max-w-md mx-auto bg-[#0B0F17]">
+        <div className="flex flex-col h-full h-[100dvh] max-w-md sm:max-w-lg mx-auto bg-[#0B0F17]">
           <ChatHeader
             roomCode={activeRoomCode}
             timerMinutes={timerMinutes}
