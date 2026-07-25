@@ -100,10 +100,10 @@ export default function MessageList({
   };
 
   return (
-    <div className="flex-1 relative overflow-hidden bg-[#0B0F17]">
+    <div className="flex-1 flex flex-col min-h-0 relative overflow-hidden bg-[#0B0F17]">
       {/* Pinned Message Banner */}
       {pinnedMessage && (
-        <div className="bg-[#151C28]/95 border-b border-cyan-500/30 px-4 py-2 flex items-center justify-between z-10 relative backdrop-blur-md">
+        <div className="bg-[#151C28]/95 border-b border-cyan-500/30 px-4 py-2 flex items-center justify-between z-10 relative backdrop-blur-md shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <Pin className="w-4 h-4 text-cyan-400 shrink-0" />
             <div className="min-w-0">
@@ -121,10 +121,10 @@ export default function MessageList({
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto p-3 sm:p-4 space-y-3"
+        className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3"
       >
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center p-6 text-gray-500">
+          <div className="flex flex-col items-center justify-center h-full text-center p-6 text-gray-500 my-auto">
             <div className="p-4 bg-[#151C28] rounded-full mb-3 border border-gray-800">
               <Clock className="w-8 h-8 text-cyan-400/60" />
             </div>
