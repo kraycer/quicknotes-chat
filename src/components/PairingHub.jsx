@@ -141,7 +141,7 @@ export default function PairingHub({ userId, onJoinRoom, onLockApp }) {
   });
 
   return (
-    <div className="flex flex-col h-full h-[100dvh] bg-[#0B0F17] text-gray-100 p-3 sm:p-4 max-w-md sm:max-w-lg mx-auto safe-pb overflow-hidden top-safe-spacer">
+    <div className="flex flex-col h-[100dvh] bg-[#0B0F17] text-gray-100 p-3 sm:p-4 max-w-md sm:max-w-lg mx-auto safe-pb overflow-hidden top-safe-spacer">
       {/* Top Header with Notch Protection */}
       <header className="flex items-center justify-between pb-3 mb-2 border-b border-gray-800/80 shrink-0">
         <div className="flex items-center gap-2.5">

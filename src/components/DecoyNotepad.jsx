@@ -72,9 +72,9 @@ export default function DecoyNotepad({ onOpenPinModal }) {
   );
 
   return (
-    <div className="flex flex-col h-full h-[100dvh] bg-[#0B0F17] text-gray-200 safe-pt safe-pb overflow-hidden">
-      {/* Header with Top Safe Area Padding */}
-      <header className="flex items-center justify-between px-4 py-3 bg-[#151C28] border-b border-gray-800 select-none pt-4 sm:pt-6">
+    <div className="flex flex-col h-full h-[100dvh] bg-[#0B0F17] text-gray-200 overflow-hidden">
+      {/* Header with Top Safe Area Padding for status bar / clock / battery */}
+      <header className="flex items-center justify-between px-4 py-3 bg-[#151C28] border-b border-gray-800 select-none shrink-0 top-safe-spacer">
         <div className="flex items-center gap-2">
           <div className="p-2 bg-cyan-500/10 text-cyan-400 rounded-lg">
             <FileText className="w-5 h-5" />
@@ -99,8 +99,8 @@ export default function DecoyNotepad({ onOpenPinModal }) {
 
       {/* Editor Modal / View */}
       {activeNote ? (
-        <div className="flex-1 flex flex-col p-4 bg-[#0B0F17]">
-          <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
+        <div className="flex-1 flex flex-col p-4 bg-[#0B0F17] overflow-hidden">
+          <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-3 shrink-0">
             <button 
               onClick={() => setActiveNote(null)}
               className="text-sm text-cyan-400 hover:underline"
@@ -119,7 +119,7 @@ export default function DecoyNotepad({ onOpenPinModal }) {
             value={editTitle}
             onChange={(e) => setEditTitle(e.target.value)}
             placeholder="Título de la nota..."
-            className="w-full bg-transparent text-xl font-bold text-gray-100 mb-3 outline-none border-b border-gray-800 pb-2"
+            className="w-full bg-transparent text-xl font-bold text-gray-100 mb-3 outline-none border-b border-gray-800 pb-2 shrink-0"
           />
           <textarea
             value={editBody}
@@ -131,7 +131,7 @@ export default function DecoyNotepad({ onOpenPinModal }) {
       ) : (
         <div className="flex-1 flex flex-col p-4 overflow-hidden">
           {/* Search bar with Secret Keyword Trigger */}
-          <div className="relative mb-4">
+          <div className="relative mb-4 shrink-0">
             <Search className="w-4 h-4 absolute left-3 top-3 text-gray-500" />
             <input
               type="text"
@@ -185,7 +185,7 @@ export default function DecoyNotepad({ onOpenPinModal }) {
           {/* FAB Create button */}
           <button
             onClick={handleCreate}
-            className="fixed bottom-6 right-6 p-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-full shadow-lg shadow-cyan-600/30 transition flex items-center justify-center active:scale-95"
+            className="fixed bottom-6 right-6 p-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-full shadow-lg shadow-cyan-600/30 transition flex items-center justify-center active:scale-95 safe-pb"
           >
             <Plus className="w-6 h-6" />
           </button>

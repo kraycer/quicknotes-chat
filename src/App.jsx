@@ -380,7 +380,7 @@ export default function App() {
   };
 
   return (
-    <div className="w-full h-full h-[100dvh] overflow-hidden bg-[#0B0F17]">
+    <div className="w-full h-[100dvh] overflow-hidden bg-[#0B0F17]">
       {/* 1. Decoy Notepad View */}
       {mode === 'decoy' && (
         <DecoyNotepad onOpenPinModal={() => setMode('pin')} />
@@ -405,7 +405,7 @@ export default function App() {
 
       {/* 4. Active Chat View */}
       {mode === 'chat' && (
-        <div className="flex flex-col h-full h-[100dvh] max-w-md sm:max-w-lg mx-auto bg-[#0B0F17]">
+        <div className="flex flex-col h-[100dvh] max-w-md sm:max-w-lg mx-auto bg-[#0B0F17] overflow-hidden">
           <ChatHeader
             roomCode={activeRoomCode}
             timerMinutes={timerMinutes}
