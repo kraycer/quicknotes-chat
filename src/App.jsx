@@ -69,29 +69,66 @@ export default function App() {
     let unsubscribe = () => {};
 
     if (isSupabaseConfigured && supabase) {
-      // Supabase Realtime Subscription
-      const channel = supabase
-        .channel(`room:${activeRoomCode}`)
+      // 1. Fetch persistent history from Supabase table if available
+      try {
+        supabase
+          .from('messages')
+          .select('*')
+          .eq('room_code', activeRoomCode)
+          .then(({ data, error }) => {
+            if (data && data.length > 0) {
+              setMessages((prev) => {
+                const combined = [...prev];
+                data.forEach((d) => {
+                  if (!combined.some((m) => m.id === d.id)) combined.push(d);
+                });
+                const filtered = filterExpiredMessages(combined);
+                saveLocalMessages(activeRoomCode, filtered);
+                return filtered;
+              });
+            }
+          });
+      } catch (e) {
+        console.warn('Error al cargar mensajes iniciales de Supabase:', e);
+      }
+
+      // 2. Realtime Channel Subscription (Dual Broadcast + Postgres Changes)
+      const channel = supabase.channel(`room:${activeRoomCode}`, {
+        config: { broadcast: { self: false } }
+      });
+
+      channel
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_code=eq.${activeRoomCode}` },
           (payload) => {
             const newMsg = payload.new;
+            if (!newMsg) return;
             setMessages((prev) => {
               if (prev.some((m) => m.id === newMsg.id)) return prev;
               const updated = filterExpiredMessages([...prev, newMsg]);
               saveLocalMessages(activeRoomCode, updated);
               return updated;
             });
-
-            // Disguised notification if backgrounded
             if (newMsg.sender_id !== userId && document.hidden) {
               triggerDisguisedNotification();
             }
           }
         )
+        .on('broadcast', { event: 'new_message' }, (payload) => {
+          const newMsg = payload.payload;
+          if (newMsg && newMsg.sender_id !== userId) {
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === newMsg.id)) return prev;
+              const updated = filterExpiredMessages([...prev, newMsg]);
+              saveLocalMessages(activeRoomCode, updated);
+              return updated;
+            });
+            if (document.hidden) triggerDisguisedNotification();
+          }
+        })
         .on('broadcast', { event: 'typing' }, (payload) => {
-          if (payload.sender_id !== userId) {
+          if (payload.payload?.sender_id !== userId && payload.sender_id !== userId) {
             setIsPeerTyping(true);
             if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
             typingTimeoutRef.current = setTimeout(() => setIsPeerTyping(false), 2500);
@@ -105,7 +142,7 @@ export default function App() {
 
       unsubscribe = () => supabase.removeChannel(channel);
     } else {
-      // Mock Event Engine for offline/instant local tab pairing
+      // Mock Engine for local tab testing
       const unSubMsg = mockEngine.on(`msg_${activeRoomCode}`, (newMsg) => {
         setMessages((prev) => {
           if (prev.some((m) => m.id === newMsg.id)) return prev;
@@ -177,17 +214,25 @@ export default function App() {
       read: false
     };
 
-    // Update locally
+    // 1. Optimistic Local Update (Sender sees message immediately)
     setMessages((prev) => {
       const updated = filterExpiredMessages([...prev, newMsg]);
       saveLocalMessages(activeRoomCode, updated);
       return updated;
     });
 
-    // Broadcast or save to Supabase
+    // 2. Broadcast & DB Insert
     if (isSupabaseConfigured && supabase) {
+      // Send via Realtime Broadcast Channel (Sub-second peer delivery)
+      supabase.channel(`room:${activeRoomCode}`).send({
+        type: 'broadcast',
+        event: 'new_message',
+        payload: newMsg
+      });
+
+      // Persist in DB table
       supabase.from('messages').insert([newMsg]).then(({ error }) => {
-        if (error) console.error('Error enviando a Supabase:', error);
+        if (error) console.error('Error insertando mensaje en Supabase:', error);
       });
     } else {
       mockEngine.emit(`msg_${activeRoomCode}`, newMsg);
@@ -223,7 +268,6 @@ export default function App() {
   };
 
   const handlePanicLock = () => {
-    // Instant panic lock back to Decoy Notepad
     setMode('decoy');
   };
 
