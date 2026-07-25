@@ -13,6 +13,7 @@ import {
   saveLocalMessages,
   filterExpiredMessages
 } from './lib/supabase';
+import { playSendSound, playReceiveSound } from './lib/soundUtils';
 
 export default function App() {
   // Auto-generate numeric User ID if not present e.g. ID-749201
@@ -31,8 +32,46 @@ export default function App() {
   const [timerMinutes, setTimerMinutes] = useState(1); // Default 1 minute
   const [messages, setMessages] = useState([]);
   const [replyingTo, setReplyingTo] = useState(null);
+  const [pinnedMessage, setPinnedMessage] = useState(null);
   const [isPeerTyping, setIsPeerTyping] = useState(false);
+  const [isPeerOnline, setIsPeerOnline] = useState(false);
+  
   const typingTimeoutRef = useRef(null);
+  const inactivityTimerRef = useRef(null);
+
+  // Auto-Lock on Inactivity or Visibility Change
+  useEffect(() => {
+    const resetInactivityTimer = () => {
+      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+      // Auto-lock to decoy after 60 seconds of zero touch/mouse input
+      inactivityTimerRef.current = setTimeout(() => {
+        if (mode !== 'decoy') {
+          setMode('decoy');
+        }
+      }, 60000);
+    };
+
+    const handleVisibility = () => {
+      if (document.hidden && mode !== 'decoy') {
+        setMode('decoy'); // Instantly lock on app switch
+      }
+    };
+
+    window.addEventListener('mousemove', resetInactivityTimer);
+    window.addEventListener('touchstart', resetInactivityTimer);
+    window.addEventListener('keydown', resetInactivityTimer);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    resetInactivityTimer();
+
+    return () => {
+      window.removeEventListener('mousemove', resetInactivityTimer);
+      window.removeEventListener('touchstart', resetInactivityTimer);
+      window.removeEventListener('keydown', resetInactivityTimer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    };
+  }, [mode]);
 
   // Request system notification permission for disguised alerts
   useEffect(() => {
@@ -49,7 +88,6 @@ export default function App() {
           const filtered = filterExpiredMessages(prev);
           if (filtered.length !== prev.length) {
             saveLocalMessages(activeRoomCode, filtered);
-            // Delete expired messages from Supabase server DB
             if (isSupabaseConfigured && supabase) {
               supabase
                 .from('messages')
@@ -66,6 +104,24 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeRoomCode]);
 
+  // Heartbeat Presence Broadcast
+  useEffect(() => {
+    if (!activeRoomCode) return;
+    const interval = setInterval(() => {
+      if (isSupabaseConfigured && supabase) {
+        supabase.channel(`room:${activeRoomCode}`).send({
+          type: 'broadcast',
+          event: 'presence',
+          payload: { sender_id: userId }
+        });
+      } else {
+        mockEngine.emit(`presence_${activeRoomCode}`, userId);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [activeRoomCode, userId]);
+
   // Load and subscribe to room messages
   useEffect(() => {
     if (!activeRoomCode) return;
@@ -77,7 +133,6 @@ export default function App() {
     let unsubscribe = () => {};
 
     if (isSupabaseConfigured && supabase) {
-      // 1. Fetch persistent history from Supabase table if available
       try {
         supabase
           .from('messages')
@@ -97,10 +152,9 @@ export default function App() {
             }
           });
       } catch (e) {
-        console.warn('Error al cargar mensajes de Supabase:', e);
+        console.warn('Error al cargar mensajes:', e);
       }
 
-      // 2. Realtime Channel Subscription (Dual Broadcast + Postgres Changes)
       const channel = supabase.channel(`room:${activeRoomCode}`, {
         config: { broadcast: { self: false } }
       });
@@ -118,8 +172,9 @@ export default function App() {
               saveLocalMessages(activeRoomCode, updated);
               return updated;
             });
-            if (newMsg.sender_id !== userId && document.hidden) {
-              triggerDisguisedNotification();
+            if (newMsg.sender_id !== userId) {
+              playReceiveSound();
+              if (document.hidden) triggerDisguisedNotification();
             }
           }
         )
@@ -132,7 +187,28 @@ export default function App() {
               saveLocalMessages(activeRoomCode, updated);
               return updated;
             });
+            playReceiveSound();
             if (document.hidden) triggerDisguisedNotification();
+          }
+        })
+        .on('broadcast', { event: 'reaction' }, (payload) => {
+          const { msgId, emoji } = payload.payload || {};
+          if (msgId && emoji) {
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id === msgId) {
+                  const reactions = { ...(m.reactions || {}) };
+                  reactions[emoji] = (reactions[emoji] || 0) + 1;
+                  return { ...m, reactions };
+                }
+                return m;
+              })
+            );
+          }
+        })
+        .on('broadcast', { event: 'presence' }, (payload) => {
+          if (payload.payload?.sender_id !== userId) {
+            setIsPeerOnline(true);
           }
         })
         .on('broadcast', { event: 'typing' }, (payload) => {
@@ -150,7 +226,7 @@ export default function App() {
 
       unsubscribe = () => supabase.removeChannel(channel);
     } else {
-      // Mock Engine for local tab testing
+      // Mock Engine for local testing
       const unSubMsg = mockEngine.on(`msg_${activeRoomCode}`, (newMsg) => {
         setMessages((prev) => {
           if (prev.some((m) => m.id === newMsg.id)) return prev;
@@ -159,8 +235,9 @@ export default function App() {
           return updated;
         });
 
-        if (newMsg.sender_id !== userId && document.hidden) {
-          triggerDisguisedNotification();
+        if (newMsg.sender_id !== userId) {
+          playReceiveSound();
+          if (document.hidden) triggerDisguisedNotification();
         }
       });
 
@@ -222,6 +299,9 @@ export default function App() {
       read: false
     };
 
+    // Play send pop sound
+    playSendSound();
+
     // 1. Optimistic Local Update
     setMessages((prev) => {
       const updated = filterExpiredMessages([...prev, newMsg]);
@@ -242,6 +322,27 @@ export default function App() {
       });
     } else {
       mockEngine.emit(`msg_${activeRoomCode}`, newMsg);
+    }
+  };
+
+  const handleReactMessage = (msgId, emoji) => {
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id === msgId) {
+          const reactions = { ...(m.reactions || {}) };
+          reactions[emoji] = (reactions[emoji] || 0) + 1;
+          return { ...m, reactions };
+        }
+        return m;
+      })
+    );
+
+    if (isSupabaseConfigured && supabase) {
+      supabase.channel(`room:${activeRoomCode}`).send({
+        type: 'broadcast',
+        event: 'reaction',
+        payload: { msgId, emoji }
+      });
     }
   };
 
@@ -313,12 +414,16 @@ export default function App() {
             onPanicLock={handlePanicLock}
             onBurnRoom={handleBurnRoom}
             isTyping={isPeerTyping}
+            isOnline={isPeerOnline}
           />
 
           <MessageList
             messages={messages}
             currentUserId={userId}
             onSwipeReply={(msg) => setReplyingTo(msg)}
+            onReactMessage={handleReactMessage}
+            pinnedMessage={pinnedMessage}
+            onPinMessage={setPinnedMessage}
           />
 
           <MessageInput

@@ -7,6 +7,8 @@ const DEFAULT_NOTES = [
   { id: '3', title: 'Ideas de Proyecto', body: 'Rediseño de interfaz minimalista con modo oscuro y atajos rápidos.', date: '21 Jul' }
 ];
 
+const SECRET_KEYWORDS = ['secret', 'vault', 'admin', 'pin', 'chat', 'pass'];
+
 export default function DecoyNotepad({ onOpenPinModal }) {
   const [notes, setNotes] = useState(() => {
     try {
@@ -29,6 +31,16 @@ export default function DecoyNotepad({ onOpenPinModal }) {
       console.error(e);
     }
   }, [notes]);
+
+  const handleSearchChange = (e) => {
+    const val = e.target.value;
+    setSearch(val);
+    // Secret Keyword Trigger in search bar!
+    if (SECRET_KEYWORDS.some((kw) => val.toLowerCase().trim() === kw)) {
+      setSearch('');
+      onOpenPinModal();
+    }
+  };
 
   const handleCreate = () => {
     const newNote = {
@@ -60,14 +72,13 @@ export default function DecoyNotepad({ onOpenPinModal }) {
   );
 
   return (
-    <div className="flex flex-col h-screen bg-[#0B0F17] text-gray-200">
-      {/* Header with Stealth Trigger */}
-      <header className="flex items-center justify-between px-4 py-3 bg-[#151C28] border-b border-gray-800 select-none">
+    <div className="flex flex-col h-full h-[100dvh] bg-[#0B0F17] text-gray-200 safe-pt safe-pb overflow-hidden">
+      {/* Header with Top Safe Area Padding */}
+      <header className="flex items-center justify-between px-4 py-3 bg-[#151C28] border-b border-gray-800 select-none pt-4 sm:pt-6">
         <div className="flex items-center gap-2">
           <div className="p-2 bg-cyan-500/10 text-cyan-400 rounded-lg">
             <FileText className="w-5 h-5" />
           </div>
-          {/* Long press or double tap trigger for secret PIN modal */}
           <h1 
             onDoubleClick={onOpenPinModal}
             className="text-lg font-semibold tracking-wide text-gray-100 cursor-pointer hover:text-cyan-400 transition"
@@ -119,13 +130,13 @@ export default function DecoyNotepad({ onOpenPinModal }) {
         </div>
       ) : (
         <div className="flex-1 flex flex-col p-4 overflow-hidden">
-          {/* Search bar */}
+          {/* Search bar with Secret Keyword Trigger */}
           <div className="relative mb-4">
             <Search className="w-4 h-4 absolute left-3 top-3 text-gray-500" />
             <input
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={handleSearchChange}
               placeholder="Buscar notas..."
               className="w-full pl-9 pr-4 py-2 bg-[#151C28] border border-gray-800 rounded-xl text-sm text-gray-200 outline-none focus:border-cyan-500/50"
             />

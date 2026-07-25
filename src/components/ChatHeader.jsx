@@ -35,27 +35,27 @@ export default function ChatHeader({
   const selectedTimerLabel = TIMER_OPTIONS.find((t) => t.value === timerMinutes)?.label || '1 Minuto';
 
   return (
-    <header className="bg-[#151C28] border-b border-gray-800 px-4 py-3 flex items-center justify-between select-none relative z-20">
+    <header className="bg-[#151C28] border-b border-gray-800 px-3 sm:px-4 py-3 flex items-center justify-between select-none relative z-20 pt-4 sm:pt-6">
       {/* Left Back & Room Code */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3">
         <button
           onClick={onBack}
           className="p-2 text-gray-400 hover:text-gray-100 hover:bg-gray-800 rounded-xl transition"
-          title="Volver"
+          title="Volver a lista de chats"
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
 
         <div>
           <div className="flex items-center gap-1.5 cursor-pointer" onClick={handleCopyCode}>
-            <span className="text-sm font-bold font-mono tracking-wide text-gray-100">
+            <span className="text-xs sm:text-sm font-bold font-mono tracking-wide text-gray-100">
               Sala {roomCode}
             </span>
             {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5 text-gray-500 hover:text-cyan-400" />}
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-subtle" />
-            <span className="text-[11px] text-gray-400">
+            <span className="text-[10px] sm:text-[11px] text-gray-400">
               {isTyping ? <span className="text-cyan-400 font-medium">Escribiendo...</span> : 'En directo'}
             </span>
           </div>
@@ -63,16 +63,16 @@ export default function ChatHeader({
       </div>
 
       {/* Right Controls */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 sm:gap-2">
         {/* Timer Dropdown Toggle */}
         <div className="relative">
           <button
             onClick={() => setShowTimerMenu(!showTimerMenu)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#0B0F17] hover:bg-gray-800 border border-gray-800 rounded-xl text-xs text-cyan-400 font-medium transition"
+            className="flex items-center gap-1.5 px-2 py-1.5 bg-[#0B0F17] hover:bg-gray-800 border border-gray-800 rounded-xl text-xs text-cyan-400 font-medium transition"
             title="Temporizador de Autodestrucción"
           >
             <Clock className="w-3.5 h-3.5" />
-            <span className="max-w-[70px] truncate">{selectedTimerLabel}</span>
+            <span className="max-w-[65px] sm:max-w-[80px] truncate text-[11px] sm:text-xs">{selectedTimerLabel}</span>
             <ChevronDown className="w-3 h-3 text-gray-400" />
           </button>
 
@@ -106,7 +106,7 @@ export default function ChatHeader({
           className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition"
           title="Destrucción Total (Purga)"
         >
-          <Flame className="w-5 h-5 text-red-500" />
+          <Flame className="w-4.5 h-4.5 text-red-500" />
         </button>
 
         {/* Panic Lock Button */}
@@ -115,7 +115,7 @@ export default function ChatHeader({
           className="p-2 text-gray-400 hover:text-cyan-400 hover:bg-gray-800 rounded-xl transition"
           title="Bloqueo de Pánico Instantáneo"
         >
-          <Lock className="w-5 h-5" />
+          <Lock className="w-4.5 h-4.5" />
         </button>
       </div>
     </header>
