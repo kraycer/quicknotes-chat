@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import DecoyNotepad from './components/DecoyNotepad';
 import PinModal from './components/PinModal';
 import PairingHub from './components/PairingHub';
@@ -11,7 +11,8 @@ import {
   mockEngine,
   getLocalMessages,
   saveLocalMessages,
-  filterExpiredMessages
+  filterExpiredMessages,
+  checkDatabaseHealth
 } from './lib/supabase';
 import { playSendSound, playReceiveSound } from './lib/soundUtils';
 
@@ -38,9 +39,13 @@ export default function App() {
   const [pinnedMessage, setPinnedMessage] = useState(null);
   const [isPeerTyping, setIsPeerTyping] = useState(false);
   const [isPeerOnline, setIsPeerOnline] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('disconnected'); // 'disconnected' | 'connecting' | 'connected' | 'error'
+  const [connectionError, setConnectionError] = useState('');
   
   const typingTimeoutRef = useRef(null);
   const inactivityTimerRef = useRef(null);
+  const channelRef = useRef(null); // SINGLE channel reference for all operations
+  const presenceIntervalRef = useRef(null);
 
   // Persist timer preference
   useEffect(() => {
@@ -112,25 +117,9 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeRoomCode]);
 
-  // Heartbeat Presence Broadcast
-  useEffect(() => {
-    if (!activeRoomCode) return;
-    const interval = setInterval(() => {
-      if (isSupabaseConfigured && supabase) {
-        supabase.channel(`room:${activeRoomCode}`).send({
-          type: 'broadcast',
-          event: 'presence',
-          payload: { sender_id: userId }
-        });
-      } else {
-        mockEngine.emit(`presence_${activeRoomCode}`, userId);
-      }
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [activeRoomCode, userId]);
-
-  // Load and subscribe to room messages
+  // ============================================================
+  // CORE FIX: Single channel management for room subscription
+  // ============================================================
   useEffect(() => {
     if (!activeRoomCode) return;
 
@@ -138,35 +127,59 @@ export default function App() {
     const initialMsgs = filterExpiredMessages(getLocalMessages(activeRoomCode));
     setMessages(initialMsgs);
 
-    let unsubscribe = () => {};
+    let cleanup = () => {};
 
     if (isSupabaseConfigured && supabase) {
-      try {
-        supabase
-          .from('messages')
-          .select('*')
-          .eq('room_code', activeRoomCode)
-          .then(({ data }) => {
-            if (data && data.length > 0) {
-              setMessages((prev) => {
-                const combined = [...prev];
-                data.forEach((d) => {
-                  if (!combined.some((m) => m.id === d.id)) combined.push(d);
-                });
-                const filtered = filterExpiredMessages(combined);
-                saveLocalMessages(activeRoomCode, filtered);
-                return filtered;
-              });
-            }
-          });
-      } catch (e) {
-        console.warn('Error al cargar mensajes:', e);
-      }
+      setConnectionStatus('connecting');
+      console.log(`[Chat] Joining room: ${activeRoomCode}, Supabase configured: true`);
 
-      const channel = supabase.channel(`room:${activeRoomCode}`, {
-        config: { broadcast: { self: false } }
+      // Run health check first
+      checkDatabaseHealth().then(({ ok, error }) => {
+        if (!ok) {
+          console.error('[Chat] Database health check failed:', error);
+          setConnectionStatus('error');
+          setConnectionError(error || 'No se puede acceder a la base de datos');
+        }
       });
 
+      // Load existing messages from server
+      supabase
+        .from('messages')
+        .select('*')
+        .eq('room_code', activeRoomCode)
+        .order('created_at', { ascending: true })
+        .then(({ data, error }) => {
+          if (error) {
+            console.error('[Chat] Error loading messages:', error);
+            setConnectionError('Error cargando mensajes: ' + error.message);
+          } else if (data && data.length > 0) {
+            console.log(`[Chat] Loaded ${data.length} messages from server`);
+            setMessages((prev) => {
+              const combined = [...prev];
+              data.forEach((d) => {
+                if (!combined.some((m) => m.id === d.id)) combined.push(d);
+              });
+              const filtered = filterExpiredMessages(combined);
+              filtered.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+              saveLocalMessages(activeRoomCode, filtered);
+              return filtered;
+            });
+          }
+        });
+
+      // CREATE A SINGLE CHANNEL for ALL operations in this room
+      const channelName = `room_${activeRoomCode}_${Date.now()}`;
+      const channel = supabase.channel(channelName, {
+        config: {
+          broadcast: { self: false },
+          presence: { key: userId }
+        }
+      });
+
+      // Store the channel reference so send functions can use it
+      channelRef.current = channel;
+
+      // Set up all listeners on this ONE channel
       channel
         .on(
           'postgres_changes',
@@ -174,6 +187,7 @@ export default function App() {
           (payload) => {
             const newMsg = payload.new;
             if (!newMsg) return;
+            console.log('[Chat] Postgres INSERT received:', newMsg.id);
             setMessages((prev) => {
               if (prev.some((m) => m.id === newMsg.id)) return prev;
               const updated = filterExpiredMessages([...prev, newMsg]);
@@ -186,9 +200,10 @@ export default function App() {
             }
           }
         )
-        .on('broadcast', { event: 'new_message' }, (payload) => {
-          const newMsg = payload.payload;
+        .on('broadcast', { event: 'new_message' }, ({ payload }) => {
+          const newMsg = payload;
           if (newMsg && newMsg.sender_id !== userId) {
+            console.log('[Chat] Broadcast new_message received:', newMsg.id);
             setMessages((prev) => {
               if (prev.some((m) => m.id === newMsg.id)) return prev;
               const updated = filterExpiredMessages([...prev, newMsg]);
@@ -199,8 +214,8 @@ export default function App() {
             if (document.hidden) triggerDisguisedNotification();
           }
         })
-        .on('broadcast', { event: 'reaction' }, (payload) => {
-          const { msgId, emoji } = payload.payload || {};
+        .on('broadcast', { event: 'reaction' }, ({ payload }) => {
+          const { msgId, emoji } = payload || {};
           if (msgId && emoji) {
             setMessages((prev) =>
               prev.map((m) => {
@@ -214,13 +229,13 @@ export default function App() {
             );
           }
         })
-        .on('broadcast', { event: 'presence' }, (payload) => {
-          if (payload.payload?.sender_id !== userId) {
+        .on('broadcast', { event: 'presence' }, ({ payload }) => {
+          if (payload?.sender_id !== userId) {
             setIsPeerOnline(true);
           }
         })
-        .on('broadcast', { event: 'typing' }, (payload) => {
-          if (payload.payload?.sender_id !== userId && payload.sender_id !== userId) {
+        .on('broadcast', { event: 'typing' }, ({ payload }) => {
+          if (payload?.sender_id !== userId) {
             setIsPeerTyping(true);
             if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
             typingTimeoutRef.current = setTimeout(() => setIsPeerTyping(false), 2500);
@@ -230,11 +245,51 @@ export default function App() {
           setMessages([]);
           saveLocalMessages(activeRoomCode, []);
         })
-        .subscribe();
+        .subscribe((status, err) => {
+          console.log(`[Chat] Channel subscription status: ${status}`, err || '');
+          if (status === 'SUBSCRIBED') {
+            setConnectionStatus('connected');
+            setConnectionError('');
+            console.log('[Chat] ✅ Successfully subscribed to room:', activeRoomCode);
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            setConnectionStatus('error');
+            setConnectionError(`Error de conexión: ${status}`);
+            console.error('[Chat] ❌ Channel error:', status, err);
+          } else if (status === 'CLOSED') {
+            setConnectionStatus('disconnected');
+          }
+        });
 
-      unsubscribe = () => supabase.removeChannel(channel);
+      // Heartbeat presence — use the SAME channel reference
+      presenceIntervalRef.current = setInterval(() => {
+        if (channelRef.current) {
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'presence',
+            payload: { sender_id: userId }
+          }).catch((e) => console.warn('[Chat] Presence broadcast error:', e));
+        }
+      }, 3000);
+
+      // Peer online timeout (if no heartbeat received in 8s, set offline)
+      const peerTimeout = setInterval(() => {
+        setIsPeerOnline(false);
+      }, 8000);
+
+      cleanup = () => {
+        console.log('[Chat] Cleaning up channel for room:', activeRoomCode);
+        if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
+        clearInterval(peerTimeout);
+        channelRef.current = null;
+        supabase.removeChannel(channel);
+        setConnectionStatus('disconnected');
+      };
     } else {
       // Mock Engine for local testing
+      console.log('[Chat] Using MockEngine (Supabase not configured)');
+      setConnectionStatus('connected');
+      setConnectionError('Modo local — los mensajes no se sincronizan entre dispositivos');
+
       const unSubMsg = mockEngine.on(`msg_${activeRoomCode}`, (newMsg) => {
         setMessages((prev) => {
           if (prev.some((m) => m.id === newMsg.id)) return prev;
@@ -262,14 +317,14 @@ export default function App() {
         saveLocalMessages(activeRoomCode, []);
       });
 
-      unsubscribe = () => {
+      cleanup = () => {
         unSubMsg();
         unSubTyping();
         unSubBurn();
       };
     }
 
-    return () => unsubscribe();
+    return () => cleanup();
   }, [activeRoomCode, userId]);
 
   const triggerDisguisedNotification = () => {
@@ -286,7 +341,10 @@ export default function App() {
     setMode('chat');
   };
 
-  const handleSendMessage = ({ type, content, media_url, reply_to }) => {
+  // ============================================================
+  // CORE FIX: All sends use the SAME channelRef
+  // ============================================================
+  const handleSendMessage = useCallback(({ type, content, media_url, reply_to }) => {
     if (!activeRoomCode) return;
 
     let expiresAt = null;
@@ -317,23 +375,38 @@ export default function App() {
       return updated;
     });
 
-    // 2. Broadcast & DB Insert
+    // 2. Broadcast & DB Insert via the SAME subscribed channel
     if (isSupabaseConfigured && supabase) {
-      supabase.channel(`room:${activeRoomCode}`).send({
-        type: 'broadcast',
-        event: 'new_message',
-        payload: newMsg
-      });
+      // Broadcast to peers (instant delivery)
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'new_message',
+          payload: newMsg
+        }).then(() => {
+          console.log('[Chat] ✅ Broadcast sent successfully');
+        }).catch((e) => {
+          console.error('[Chat] ❌ Broadcast send error:', e);
+        });
+      } else {
+        console.warn('[Chat] ⚠️ No channel ref available for broadcast');
+      }
 
+      // Persist to database (durable delivery)
       supabase.from('messages').insert([newMsg]).then(({ error }) => {
-        if (error) console.error('Error insertando mensaje en Supabase:', error);
+        if (error) {
+          console.error('[Chat] ❌ Error inserting message into Supabase:', error);
+          setConnectionError('Error guardando mensaje: ' + error.message);
+        } else {
+          console.log('[Chat] ✅ Message persisted to database');
+        }
       });
     } else {
       mockEngine.emit(`msg_${activeRoomCode}`, newMsg);
     }
-  };
+  }, [activeRoomCode, timerMinutes, userId]);
 
-  const handleReactMessage = (msgId, emoji) => {
+  const handleReactMessage = useCallback((msgId, emoji) => {
     setMessages((prev) =>
       prev.map((m) => {
         if (m.id === msgId) {
@@ -345,43 +418,45 @@ export default function App() {
       })
     );
 
-    if (isSupabaseConfigured && supabase) {
-      supabase.channel(`room:${activeRoomCode}`).send({
+    if (channelRef.current) {
+      channelRef.current.send({
         type: 'broadcast',
         event: 'reaction',
         payload: { msgId, emoji }
-      });
+      }).catch((e) => console.warn('[Chat] Reaction broadcast error:', e));
     }
-  };
+  }, []);
 
-  const handleTyping = () => {
+  const handleTyping = useCallback(() => {
     if (!activeRoomCode) return;
-    if (isSupabaseConfigured && supabase) {
-      supabase.channel(`room:${activeRoomCode}`).send({
+    if (channelRef.current) {
+      channelRef.current.send({
         type: 'broadcast',
         event: 'typing',
         payload: { sender_id: userId }
-      });
-    } else {
+      }).catch((e) => console.warn('[Chat] Typing broadcast error:', e));
+    } else if (!isSupabaseConfigured) {
       mockEngine.emit(`typing_${activeRoomCode}`, userId);
     }
-  };
+  }, [activeRoomCode, userId]);
 
-  const handleBurnRoom = () => {
+  const handleBurnRoom = useCallback(() => {
     if (window.confirm('¿Seguro que deseas destruir permanentemente todo el historial de esta sala?')) {
       setMessages([]);
       saveLocalMessages(activeRoomCode, []);
       if (isSupabaseConfigured && supabase) {
         supabase.from('messages').delete().eq('room_code', activeRoomCode).then(() => {});
-        supabase.channel(`room:${activeRoomCode}`).send({
-          type: 'broadcast',
-          event: 'burn'
-        });
+        if (channelRef.current) {
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'burn'
+          }).catch((e) => console.warn('[Chat] Burn broadcast error:', e));
+        }
       } else {
         mockEngine.emit(`burn_${activeRoomCode}`, true);
       }
     }
-  };
+  }, [activeRoomCode]);
 
   const handlePanicLock = () => {
     setMode('decoy');
@@ -423,6 +498,8 @@ export default function App() {
             onBurnRoom={handleBurnRoom}
             isTyping={isPeerTyping}
             isOnline={isPeerOnline}
+            connectionStatus={connectionStatus}
+            connectionError={connectionError}
           />
 
           <MessageList

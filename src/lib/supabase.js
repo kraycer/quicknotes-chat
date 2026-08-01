@@ -1,30 +1,58 @@
 import { createClient } from '@supabase/supabase-js';
 
-const rawUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+// Primary: environment variables (for local dev with .env)
+// Fallback: hardcoded credentials (for APK builds where .env is not available)
+const FALLBACK_URL = 'https://unvgkzvqcrscdoxxnbhd.supabase.co';
+const FALLBACK_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVudmdrenZxY3JzY2RveHhuYmhkIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NDk4NjI2NiwiZXhwIjoyMTAwNTYyMjY2fQ.p9O2B5igDWzzAH7CtFDQFN6d-gWJxrNTV3FlqCOuNT0';
 
-let validUrl = rawUrl.trim();
+const rawUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim() || FALLBACK_URL;
+const supabaseKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim() || FALLBACK_KEY;
+
+let validUrl = rawUrl;
 if (validUrl && !validUrl.startsWith('http://') && !validUrl.startsWith('https://')) {
   validUrl = `https://${validUrl}`;
 }
 
-export const isSupabaseConfigured = Boolean(
-  validUrl &&
-  validUrl.length > 5 &&
-  supabaseAnonKey &&
-  !supabaseAnonKey.includes('tu-clave')
-);
+export const isSupabaseConfigured = Boolean(validUrl && validUrl.length > 5 && supabaseKey && supabaseKey.length > 10);
 
 let supabaseInstance = null;
 if (isSupabaseConfigured) {
   try {
-    supabaseInstance = createClient(validUrl, supabaseAnonKey);
+    supabaseInstance = createClient(validUrl, supabaseKey, {
+      realtime: {
+        params: {
+          eventsPerSecond: 10
+        }
+      }
+    });
+    console.log('[Supabase] Client initialized successfully. URL:', validUrl.substring(0, 40) + '...');
   } catch (e) {
-    console.warn('Error inicializando Supabase Client:', e);
+    console.error('[Supabase] Error initializing client:', e);
   }
+} else {
+  console.warn('[Supabase] NOT configured. Running in local-only mock mode. URL:', rawUrl, 'Key length:', supabaseKey.length);
 }
 
 export const supabase = supabaseInstance;
+
+// Health check: verify the messages table exists and is accessible
+export const checkDatabaseHealth = async () => {
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: 'Supabase not configured — running in mock mode' };
+  }
+  try {
+    const { data, error } = await supabase.from('messages').select('id').limit(1);
+    if (error) {
+      console.error('[Supabase] Health check failed:', error);
+      return { ok: false, error: error.message };
+    }
+    console.log('[Supabase] Health check passed. Messages table accessible.');
+    return { ok: true };
+  } catch (e) {
+    console.error('[Supabase] Health check exception:', e);
+    return { ok: false, error: e.message };
+  }
+};
 
 // Built-in Mock Event Engine for offline / immediate zero-config testing
 class LocalRealtimeEngine {
