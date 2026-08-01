@@ -339,6 +339,20 @@ export default function App() {
   const handleJoinRoom = (code) => {
     setActiveRoomCode(code);
     setMode('chat');
+
+    // Ensure the room exists in Supabase (required by foreign key constraint)
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('rooms').upsert(
+        { code: code, autodestruct_minutes: timerMinutes },
+        { onConflict: 'code', ignoreDuplicates: true }
+      ).then(({ error }) => {
+        if (error) {
+          console.warn('[Chat] Room upsert warning:', error.message);
+        } else {
+          console.log('[Chat] ✅ Room ensured in database:', code);
+        }
+      });
+    }
   };
 
   // ============================================================
@@ -392,8 +406,13 @@ export default function App() {
         console.warn('[Chat] ⚠️ No channel ref available for broadcast');
       }
 
-      // Persist to database (durable delivery)
-      supabase.from('messages').insert([newMsg]).then(({ error }) => {
+      // Ensure room exists first (foreign key constraint), then persist message
+      supabase.from('rooms').upsert(
+        { code: activeRoomCode, autodestruct_minutes: timerMinutes },
+        { onConflict: 'code', ignoreDuplicates: true }
+      ).then(() => {
+        return supabase.from('messages').insert([newMsg]);
+      }).then(({ error }) => {
         if (error) {
           console.error('[Chat] ❌ Error inserting message into Supabase:', error);
           setConnectionError('Error guardando mensaje: ' + error.message);
